@@ -1,0 +1,19 @@
+# Visual Studio temporary and build files
+*.obj
+*.exp
+*.lib
+*.pdb
+*.ilk
+*.idb
+
+# Log files and crash dumps
+*.log
+disasm.txt
+mini.txt
+owl_strings.txt
+
+# OS / Editor files
+.vs/
+.vscode/
+Thumbs.db
+Desktop.ini
