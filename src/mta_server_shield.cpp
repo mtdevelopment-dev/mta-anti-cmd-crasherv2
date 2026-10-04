@@ -1,8 +1,3 @@
-// c:/Users/Faxror/Downloads/mta_cmd_logger/mta_server_shield.cpp
-// language: C++ (C++17)
-// runtime: Windows x64 DLL for Multi Theft Auto Server x64
-// bitness: 64-bit (x64)
-
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winsock2.h>
@@ -25,9 +20,6 @@
 #pragma comment(lib, "kernel32.lib")
 #pragma comment(lib, "user32.lib")
 
-// ============================================================================
-// CONSTANTS & LOGGING (NO BANS, NO FIREWALL BLOCKS)
-// ============================================================================
 static char SHIELD_LOG[MAX_PATH] = "mta_packet_audit.log";
 static char CRASH_PACKET_LOG[MAX_PATH] = "mta_crash_packet.log";
 static const int kMaxSaneDatagram = 4096;
@@ -111,9 +103,6 @@ static bool Readable(const void* p, size_t n)
     return end <= regionEnd;
 }
 
-// ============================================================================
-// 1. BITSTREAM WRITEBITS BUFFER OVERFLOW PROTECTION (CASCADE FIX)
-// ============================================================================
 static std::atomic<bool> g_WriteBitsHooked(false);
 static volatile uint32_t* g_pBlockedCounter = nullptr;
 
@@ -138,16 +127,16 @@ static void InstallWriteBitsHook()
     uint8_t* continueAddr = target + 19;
 
     uint8_t stubCode[48] = {
-        0x41, 0x81, 0xF8, 0x00, 0x00, 0x10, 0x00, // 0..6:   cmp r8d, 0x100000
-        0x77, 0x1D,                               // 7..8:   ja drop
-        0x45, 0x85, 0xC0,                         // 9..11:  test r8d, r8d
-        0x74, 0x18,                               // 12..13: je drop
-        0x48, 0x89, 0x5C, 0x24, 0x10,             // 14..18: mov [rsp+10h], rbx
-        0x48, 0x89, 0x6C, 0x24, 0x18,             // 19..23: mov [rsp+18h], rbp
-        0xFF, 0x25, 0x00, 0x00, 0x00, 0x00,       // 24..29: jmp [rip+0]
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 30..37: continueAddr
-        0xFF, 0x05, 0x04, 0x00, 0x00, 0x00,       // 38..43: inc dword ptr [rip+4]
-        0xC3                                      // 44:     ret
+        0x41, 0x81, 0xF8, 0x00, 0x00, 0x10, 0x00,
+        0x77, 0x1D,
+        0x45, 0x85, 0xC0,
+        0x74, 0x18,
+        0x48, 0x89, 0x5C, 0x24, 0x10,
+        0x48, 0x89, 0x6C, 0x24, 0x18,
+        0xFF, 0x25, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xFF, 0x05, 0x04, 0x00, 0x00, 0x00,
+        0xC3
     };
 
     std::memcpy(&stubCode[30], &continueAddr, sizeof(void*));
@@ -181,9 +170,6 @@ static void InstallWriteBitsHook()
     }
 }
 
-// ============================================================================
-// 2. PULSE STRIKE EXPLOIT PROTECTION 1 (deathmatch.dll + 0x1A4110)
-// ============================================================================
 typedef bool (*tFunc1A4110)(void* rcx, void* rdx, void* r8);
 static tFunc1A4110 g_OrigFunc1A4110 = nullptr;
 static std::atomic<bool> g_PulseStrikeHooked(false);
@@ -263,10 +249,6 @@ static void InstallPulseStrikeHook()
     }
 }
 
-// ============================================================================
-// 3. PULSE STRIKE EXPLOIT PROTECTION 2 (deathmatch.dll + 0x1A25B0)
-// Prevents crash at 0x1A2627 / 0x1A2647 when entity vector in rdx is invalid.
-// ============================================================================
 typedef void (*tFunc1A25B0)(void* rcx, void* rdx, void* r8);
 static tFunc1A25B0 g_OrigFunc1A25B0 = nullptr;
 static std::atomic<bool> g_Func1A25B0Hooked(false);
@@ -342,10 +324,6 @@ static void InstallFunc1A25B0Hook()
     }
 }
 
-// ============================================================================
-// 4. CLUAARGUMENT READ ACCESS SHIELD (deathmatch.dll + 0x19F7D0)
-// Prevents AV crash at 0x19F80B when other argument pointer is invalid.
-// ============================================================================
 typedef void* (*tFunc19F7D0)(void* rcx, void* rdx, void* r8);
 static tFunc19F7D0 g_OrigFunc19F7D0 = nullptr;
 static std::atomic<bool> g_Func19F7D0Hooked(false);
@@ -356,7 +334,7 @@ void* Hooked_Func19F7D0(void* rcx, void* rdx, void* r8)
     {
         if (rcx && Readable(rcx, 16))
         {
-            *(int*)rcx = 0; // Set to safe LUA_TNIL
+            *(int*)rcx = 0;
         }
         return rcx;
     }
@@ -420,11 +398,6 @@ static void InstallFunc19F7D0Hook()
     }
 }
 
-// ============================================================================
-// 5. LUA TABLE NIL INDEX SINK & PANIC PREVENTER (lua5.1.dll)
-// Prevents "PANIC: unprotected error in call to Lua API (table index is nil)"
-// by safely redirecting nil-key writes to a dummy sink and disabling exit(1).
-// ============================================================================
 typedef void* (*tLuaH_Set)(void* L, void* t, void* key);
 static tLuaH_Set g_OrigLuaH_Set = nullptr;
 static std::atomic<bool> g_LuaHSetHooked(false);
@@ -435,13 +408,11 @@ void* Hooked_LuaH_Set(void* L, void* t, void* key)
     if (!key) return s_DummySinkTValue;
 
     int tt = *(int*)((uint8_t*)key + 8);
-    // 1. Table index is nil
-    if (tt == 0 /* LUA_TNIL */)
+    if (tt == 0)
     {
         return s_DummySinkTValue;
     }
-    // 2. Table index is NaN or Inf (Whisper exploit)
-    if (tt == 3 /* LUA_TNUMBER */)
+    if (tt == 3)
     {
         double d = *(double*)key;
         if (d != d || std::isnan(d) || std::isinf(d))
@@ -461,7 +432,6 @@ static void InstallLuaProtection()
     HMODULE hLua = GetModuleHandleA("lua5.1.dll");
     if (!hLua) return;
 
-    // A. Hook luaH_set (0x179C0)
     uint8_t* target = (uint8_t*)hLua + 0x179C0;
     static const uint8_t kExpectedPrefix[15] = {
         0x48, 0x89, 0x5C, 0x24, 0x08,
@@ -510,15 +480,14 @@ static void InstallLuaProtection()
         }
     }
 
-    // B. Neutralize exit(1) in luaD_throw panic handler (0xB704)
     uint8_t* pPanicExit = (uint8_t*)hLua + 0xB704;
     if (pPanicExit[0] == 0xB9 && pPanicExit[1] == 0x01 && pPanicExit[5] == 0xE8)
     {
         DWORD oldProt = 0;
         if (VirtualProtect(pPanicExit, 10, PAGE_EXECUTE_READWRITE, &oldProt))
         {
-            pPanicExit[0] = 0xC3; // ret
-            for (int i = 1; i < 10; ++i) pPanicExit[i] = 0x90; // nop
+            pPanicExit[0] = 0xC3;
+            for (int i = 1; i < 10; ++i) pPanicExit[i] = 0x90;
             VirtualProtect(pPanicExit, 10, oldProt, &oldProt);
             FlushInstructionCache(GetCurrentProcess(), pPanicExit, 10);
             LogAndPrint("MTGuard", FOREGROUND_GREEN | FOREGROUND_INTENSITY,
@@ -527,9 +496,6 @@ static void InstallLuaProtection()
     }
 }
 
-// ============================================================================
-// CRASH AUDIT & RECOVERY (VEH)
-// ============================================================================
 static thread_local int t_InFilter = 0;
 
 static void ModOf(DWORD64 addr, char* out, size_t outn, DWORD64& rva)
@@ -605,7 +571,6 @@ LONG WINAPI CrashFilter(PEXCEPTION_POINTERS pExceptionInfo)
 
     PCONTEXT ctx = pExceptionInfo->ContextRecord;
 
-    // 1. Check net.dll exceptions
     HMODULE hNet = GetModuleHandleA("net.dll");
     if (hNet)
     {
@@ -642,7 +607,6 @@ LONG WINAPI CrashFilter(PEXCEPTION_POINTERS pExceptionInfo)
         }
     }
 
-    // 2. Check deathmatch.dll exceptions
     HMODULE hDm = GetModuleHandleA("deathmatch.dll");
     if (hDm && code == EXCEPTION_ACCESS_VIOLATION)
     {
@@ -662,7 +626,6 @@ LONG WINAPI CrashFilter(PEXCEPTION_POINTERS pExceptionInfo)
             InstallFunc19F7D0Hook();
         }
 
-        // Pulse Strike function #1 (0x1A4110 .. 0x1A4223)
         if (rip >= dmBase + 0x1A4110 && rip <= dmBase + 0x1A4223)
         {
             DWORD64 r11 = ctx->Rsp + 0x50;
@@ -683,7 +646,6 @@ LONG WINAPI CrashFilter(PEXCEPTION_POINTERS pExceptionInfo)
             }
         }
 
-        // Pulse Strike function #2 (0x1A25B0 .. 0x1A26C0)
         if (rip >= dmBase + 0x1A25B0 && rip <= dmBase + 0x1A26C0)
         {
             DWORD64 r11 = ctx->Rsp + 0x50;
@@ -703,7 +665,6 @@ LONG WINAPI CrashFilter(PEXCEPTION_POINTERS pExceptionInfo)
             }
         }
 
-        // CLuaArgument function (0x19F7D0 .. 0x19F910)
         if (rip >= dmBase + 0x19F7D0 && rip <= dmBase + 0x19F910)
         {
             if (Readable((void*)(ctx->Rsp + 0x30), 8))
@@ -721,7 +682,6 @@ LONG WINAPI CrashFilter(PEXCEPTION_POINTERS pExceptionInfo)
             }
         }
 
-        // General deathmatch.dll access violation unwind
         DWORD64 imageBase = 0;
         PRUNTIME_FUNCTION entry = RtlLookupFunctionEntry(rip, &imageBase, nullptr);
         if (entry && imageBase == dmBase)
@@ -739,9 +699,6 @@ LONG WINAPI CrashFilter(PEXCEPTION_POINTERS pExceptionInfo)
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-// ============================================================================
-// WINSOCK HOOKS (recvfrom & WSARecvFrom) - PACKET SIZE FILTER ONLY, ZERO BANS
-// ============================================================================
 typedef int(WSAAPI* tRecvFrom)(SOCKET s, char* buf, int len, int flags, struct sockaddr* from, int* fromlen);
 typedef int(WSAAPI* tWSARecvFrom)(SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount, LPDWORD lpNumberOfBytesRecvd, LPDWORD lpFlags, struct sockaddr* lpFrom, LPINT lpFromlen, LPWSAOVERLAPPED lpOverlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine);
 
@@ -798,9 +755,6 @@ int WSAAPI Detour_WSARecvFrom(SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount,
     return SOCKET_ERROR;
 }
 
-// ============================================================================
-// IAT HOOK ENGINE
-// ============================================================================
 bool HookIAT(HMODULE hModule, const char* targetDll, const char* funcName, void* detour, void** original)
 {
     if (!hModule) return false;
@@ -916,9 +870,6 @@ void HookAllProcessModules()
     }
 }
 
-// ============================================================================
-// INITIALIZATION THREAD
-// ============================================================================
 DWORD WINAPI ShieldInitThread(LPVOID)
 {
     HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
@@ -983,9 +934,6 @@ DWORD WINAPI ShieldInitThread(LPVOID)
     return 0;
 }
 
-// ============================================================================
-// OFFICIAL MTA MODULE EXPORTS (COMPLIANT WITH MTA SERVER SDK)
-// ============================================================================
 extern "C" {
     __declspec(dllexport) bool InitModule(void* pManager, char* szModuleName, char* szAuthor, float* fVersion)
     {
@@ -1051,9 +999,6 @@ extern "C" {
     }
 }
 
-// ============================================================================
-// DLL ENTRY POINT
-// ============================================================================
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID)
 {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH)
