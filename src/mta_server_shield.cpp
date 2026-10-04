@@ -1,12 +1,44 @@
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <psapi.h>
+#include <share.h>
+
+#pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "psapi.lib")
+#pragma comment(lib, "kernel32.lib")
+#pragma comment(lib, "user32.lib")
+#define MTA_EXPORT __declspec(dllexport)
+#else
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/syscall.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <dlfcn.h>
+#include <signal.h>
+#include <ucontext.h>
+#include <link.h>
+#include <pthread.h>
+#include <errno.h>
+#include <fcntl.h>
+#define MTA_EXPORT __attribute__((visibility("default")))
+#ifndef MAX_PATH
+#define MAX_PATH 4096
+#endif
+#endif
+
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
-#include <share.h>
+#include <cstdarg>
 #include <string>
 #include <vector>
 #include <unordered_set>
@@ -15,15 +47,11 @@
 #include <iomanip>
 #include <cmath>
 
-#pragma comment(lib, "ws2_32.lib")
-#pragma comment(lib, "psapi.lib")
-#pragma comment(lib, "kernel32.lib")
-#pragma comment(lib, "user32.lib")
-
 static char SHIELD_LOG[MAX_PATH] = "mta_packet_audit.log";
 static char CRASH_PACKET_LOG[MAX_PATH] = "mta_crash_packet.log";
 static const int kMaxSaneDatagram = 4096;
 
+#ifdef _WIN32
 static void InitLogPaths(HMODULE self)
 {
     char dir[MAX_PATH] = {0};
@@ -102,10 +130,105 @@ static bool Readable(const void* p, size_t n)
     uintptr_t regionEnd = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
     return end <= regionEnd;
 }
+#else
+enum LinuxColor {
+    COLOR_DEFAULT = 0,
+    COLOR_GREEN,
+    COLOR_RED,
+    COLOR_YELLOW,
+    COLOR_CYAN
+};
+
+static void InitLogPathsLinux()
+{
+    Dl_info info;
+    if (dladdr((void*)InitLogPathsLinux, &info) && info.dli_fname)
+    {
+        char dir[1024] = {0};
+        std::strncpy(dir, info.dli_fname, sizeof(dir) - 1);
+        char* slash = std::strrchr(dir, '/');
+        if (slash)
+        {
+            *(slash + 1) = 0;
+            std::snprintf(SHIELD_LOG, sizeof(SHIELD_LOG), "%smta_packet_audit.log", dir);
+            std::snprintf(CRASH_PACKET_LOG, sizeof(CRASH_PACKET_LOG), "%smta_crash_packet.log", dir);
+            return;
+        }
+    }
+    std::snprintf(SHIELD_LOG, sizeof(SHIELD_LOG), "mta_packet_audit.log");
+    std::snprintf(CRASH_PACKET_LOG, sizeof(CRASH_PACKET_LOG), "mta_crash_packet.log");
+}
+
+void PrintToMtaConsole(const char* text, int colorCode = COLOR_GREEN)
+{
+    const char* prefix = "\033[1;32m";
+    switch (colorCode)
+    {
+        case COLOR_RED: prefix = "\033[1;31m"; break;
+        case COLOR_YELLOW: prefix = "\033[1;33m"; break;
+        case COLOR_CYAN: prefix = "\033[1;36m"; break;
+        case COLOR_DEFAULT: prefix = "\033[0m"; break;
+        default: prefix = "\033[1;32m"; break;
+    }
+    std::printf("%s%s\033[0m", prefix, text);
+    std::fflush(stdout);
+}
+
+void LogAndPrint(const char* tag, int colorCode, const char* format, ...)
+{
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    struct tm tm_val;
+    localtime_r(&tv.tv_sec, &tm_val);
+
+    char timeBuf[64];
+    std::snprintf(timeBuf, sizeof(timeBuf), "[%04d-%02d-%02d %02d:%02d:%02d.%03ld]",
+                  tm_val.tm_year + 1900, tm_val.tm_mon + 1, tm_val.tm_mday,
+                  tm_val.tm_hour, tm_val.tm_min, tm_val.tm_sec, tv.tv_usec / 1000);
+
+    char msgBuf[4096];
+    va_list args;
+    va_start(args, format);
+    std::vsnprintf(msgBuf, sizeof(msgBuf), format, args);
+    va_end(args);
+
+    char consoleLine[4200];
+    std::snprintf(consoleLine, sizeof(consoleLine), "%s [%s] %s\n", timeBuf, tag, msgBuf);
+    PrintToMtaConsole(consoleLine, colorCode);
+
+    FILE* fp = fopen(SHIELD_LOG, "a");
+    if (fp)
+    {
+        std::fprintf(fp, "%s [%s] %s\n", timeBuf, tag, msgBuf);
+        std::fclose(fp);
+    }
+}
+
+static int g_CheckPipe[2] = {-1, -1};
+static bool Readable(const void* p, size_t n)
+{
+    if (!p || n == 0) return false;
+    if (g_CheckPipe[0] == -1)
+    {
+        if (pipe(g_CheckPipe) != 0) return false;
+        fcntl(g_CheckPipe[0], F_SETFL, O_NONBLOCK);
+        fcntl(g_CheckPipe[1], F_SETFL, O_NONBLOCK);
+    }
+    ssize_t w = write(g_CheckPipe[1], p, n);
+    if (w > 0)
+    {
+        char buf[512];
+        while (read(g_CheckPipe[0], buf, sizeof(buf)) > 0);
+        return true;
+    }
+    return false;
+}
+#endif
 
 static std::atomic<bool> g_WriteBitsHooked(false);
 static volatile uint32_t* g_pBlockedCounter = nullptr;
 
+#ifdef _WIN32
 static void InstallWriteBitsHook()
 {
     if (g_WriteBitsHooked.load()) return;
@@ -933,17 +1056,195 @@ DWORD WINAPI ShieldInitThread(LPVOID)
 
     return 0;
 }
+#else
+// ============================================================================
+// LINUX IMPLEMENTATION (x86_64 ELF)
+// ============================================================================
+typedef ssize_t (*t_real_recvfrom)(int, void*, size_t, int, struct sockaddr*, socklen_t*);
+static t_real_recvfrom g_RealRecvFrom = nullptr;
+static struct sigaction g_OldSigSegv = {};
+static struct sigaction g_OldSigBus = {};
+static thread_local int t_InFilterLinux = 0;
 
+static void InitRealRecvFrom()
+{
+    if (!g_RealRecvFrom)
+    {
+        g_RealRecvFrom = (t_real_recvfrom)dlsym(RTLD_NEXT, "recvfrom");
+        if (!g_RealRecvFrom)
+        {
+            g_RealRecvFrom = (t_real_recvfrom)dlsym(RTLD_DEFAULT, "recvfrom");
+        }
+    }
+}
+
+static ssize_t DirectRecvFrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen)
+{
+    if (g_RealRecvFrom)
+    {
+        return g_RealRecvFrom(sockfd, buf, len, flags, src_addr, addrlen);
+    }
+#ifdef SYS_recvfrom
+    return (ssize_t)syscall(SYS_recvfrom, sockfd, buf, len, flags, src_addr, addrlen);
+#else
+    return -1;
+#endif
+}
+
+extern "C" MTA_EXPORT ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen)
+{
+    InitRealRecvFrom();
+
+    for (int attempts = 0; attempts < 8; ++attempts)
+    {
+        ssize_t bytes = DirectRecvFrom(sockfd, buf, len, flags, src_addr, addrlen);
+        if (bytes <= 0 || buf == nullptr) return bytes;
+
+        if (bytes > kMaxSaneDatagram)
+        {
+            // Drop oversized/cascade exploit datagram
+            continue;
+        }
+
+        return bytes;
+    }
+
+    errno = EWOULDBLOCK;
+    return -1;
+}
+
+static void LinuxCrashSignalHandler(int sig, siginfo_t* info, void* ucontext)
+{
+    if (t_InFilterLinux)
+    {
+        if (sig == SIGSEGV && g_OldSigSegv.sa_sigaction) g_OldSigSegv.sa_sigaction(sig, info, ucontext);
+        else if (sig == SIGBUS && g_OldSigBus.sa_sigaction) g_OldSigBus.sa_sigaction(sig, info, ucontext);
+        return;
+    }
+    t_InFilterLinux = 1;
+
+    ucontext_t* uc = (ucontext_t*)ucontext;
+    uintptr_t rip = 0;
+#if defined(__x86_64__) || defined(_M_X64)
+    rip = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
+#endif
+
+    Dl_info dlinfo;
+    const char* modName = "unknown";
+    uintptr_t rva = 0;
+    if (rip != 0 && dladdr((void*)rip, &dlinfo) && dlinfo.dli_fname)
+    {
+        const char* slash = std::strrchr(dlinfo.dli_fname, '/');
+        modName = slash ? slash + 1 : dlinfo.dli_fname;
+        rva = rip - (uintptr_t)dlinfo.dli_fbase;
+    }
+
+    FILE* fp = fopen(SHIELD_LOG, "a");
+    if (fp)
+    {
+        std::fprintf(fp, "CRASH signal=%d (%s) rip=0x%lx mod=%s rva=0x%lx addr=%p\n",
+                     sig, sig == SIGSEGV ? "SIGSEGV" : "SIGBUS",
+                     (unsigned long)rip, modName, (unsigned long)rva,
+                     info ? info->si_addr : nullptr);
+        std::fclose(fp);
+    }
+
+    if (std::strstr(modName, "deathmatch") != nullptr || std::strstr(modName, "net") != nullptr)
+    {
+        LogAndPrint("MTGuard", COLOR_GREEN,
+                    "Linux Exploit engellendi ve sunucu korundu! (%s RVA: 0x%lx)",
+                    modName, (unsigned long)rva);
+
+#if defined(__x86_64__) || defined(_M_X64)
+        uintptr_t rsp = (uintptr_t)uc->uc_mcontext.gregs[REG_RSP];
+        if (Readable((void*)rsp, sizeof(uintptr_t)))
+        {
+            uintptr_t retAddr = *(uintptr_t*)rsp;
+            uc->uc_mcontext.gregs[REG_RSP] += sizeof(uintptr_t);
+            uc->uc_mcontext.gregs[REG_RIP] = retAddr;
+            uc->uc_mcontext.gregs[REG_RAX] = 0;
+            t_InFilterLinux = 0;
+            return;
+        }
+#endif
+    }
+
+    t_InFilterLinux = 0;
+    if (sig == SIGSEGV && (g_OldSigSegv.sa_flags & SA_SIGINFO) && g_OldSigSegv.sa_sigaction)
+    {
+        g_OldSigSegv.sa_sigaction(sig, info, ucontext);
+    }
+    else if (sig == SIGBUS && (g_OldSigBus.sa_flags & SA_SIGINFO) && g_OldSigBus.sa_sigaction)
+    {
+        g_OldSigBus.sa_sigaction(sig, info, ucontext);
+    }
+}
+
+static void InstallLinuxCrashProtection()
+{
+    struct sigaction sa;
+    std::memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = LinuxCrashSignalHandler;
+    sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+    sigemptyset(&sa.sa_mask);
+
+    sigaction(SIGSEGV, &sa, &g_OldSigSegv);
+    sigaction(SIGBUS, &sa, &g_OldSigBus);
+}
+
+static void* ShieldInitThreadLinux(void*)
+{
+    InstallLinuxCrashProtection();
+    InitRealRecvFrom();
+
+    const char* banner =
+        "\n"
+        "  +-----------------------------------------------------------------------+\n"
+        "  |             MT Development - ANTI-CMD-CRASHER (LINUX x64)             |\n"
+        "  |                   Create By Faxror - Serius - Sely                    |\n"
+        "  |                       Discord: discord.gg/mtguard                     |\n"
+        "  +-----------------------------------------------------------------------+\n"
+        "  |  [*] Durum   : AKTIF & KORUMA CALISIYOR (LINUX)                       |\n"
+        "  |  [*] Koruma  : CASCADE, PULSE STRIKE & MALFORMED PACKET FILTRESI      |\n"
+        "  |  [*] Mod     : SIFIR BAN - CRASH VE SUNUCU KAPANMASI ENGELLENDI       |\n"
+        "  +-----------------------------------------------------------------------+\n\n";
+    PrintToMtaConsole(banner, COLOR_GREEN);
+
+    return nullptr;
+}
+
+__attribute__((constructor)) static void OnLinuxModuleLoaded()
+{
+    InitLogPathsLinux();
+    pthread_t th;
+    pthread_create(&th, nullptr, ShieldInitThreadLinux, nullptr);
+    pthread_detach(th);
+}
+#endif
+
+// ============================================================================
+// MTA SERVER MODULE EXPORTS (COMMON)
+// ============================================================================
 extern "C" {
-    __declspec(dllexport) bool InitModule(void* pManager, char* szModuleName, char* szAuthor, float* fVersion)
+    MTA_EXPORT bool InitModule(void* pManager, char* szModuleName, char* szAuthor, float* fVersion)
     {
         if (szModuleName)
         {
+#ifdef _WIN32
             strncpy_s(szModuleName, 32, "MTGuard", _TRUNCATE);
+#else
+            std::strncpy(szModuleName, "MTGuard", 31);
+            szModuleName[31] = '\0';
+#endif
         }
         if (szAuthor)
         {
+#ifdef _WIN32
             strncpy_s(szAuthor, 64, "MT Development", _TRUNCATE);
+#else
+            std::strncpy(szAuthor, "MT Development", 63);
+            szAuthor[63] = '\0';
+#endif
         }
         if (fVersion)
         {
@@ -952,8 +1253,9 @@ extern "C" {
         return true;
     }
 
-    __declspec(dllexport) void DoPulse()
+    MTA_EXPORT void DoPulse()
     {
+#ifdef _WIN32
         if (!g_WriteBitsHooked.load())
         {
             InstallWriteBitsHook();
@@ -987,18 +1289,20 @@ extern "C" {
                 s_LastLoggedCount = current;
             }
         }
+#endif
     }
 
-    __declspec(dllexport) void ShutdownModule()
+    MTA_EXPORT void ShutdownModule()
     {
     }
 
-    __declspec(dllexport) bool RegisterFunction(void* pLuaVM, const char* szFunctionName, void* pFunction)
+    MTA_EXPORT bool RegisterFunction(void* pLuaVM, const char* szFunctionName, void* pFunction)
     {
         return true;
     }
 }
 
+#ifdef _WIN32
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID)
 {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH)
@@ -1013,3 +1317,4 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID)
     }
     return TRUE;
 }
+#endif
