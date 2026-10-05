@@ -227,6 +227,7 @@ static bool Readable(const void* p, size_t n)
 
 static std::atomic<bool> g_WriteBitsHooked(false);
 static volatile uint32_t* g_pBlockedCounter = nullptr;
+static uint8_t* g_pWriteBitsTarget = nullptr;
 
 #ifdef _WIN32
 static uint8_t* ScanPattern(HMODULE hMod, const uint8_t* pattern, const char* mask, size_t len)
@@ -283,7 +284,7 @@ static void InstallWriteBitsHook()
         0x48, 0x89, 0x5C, 0x24, 0x10,
         0x48, 0x89, 0x6C, 0x24, 0x18
     };
-    static const char kMask[] = "xxxxx????xxxxxxxx";
+    static const char kMask[] = "xxxxx????xxxxxxxxxx";
     uint8_t* target = ScanPattern(hNet, kPattern, kMask, sizeof(kPattern));
 
     if (!target)
@@ -295,6 +296,8 @@ static void InstallWriteBitsHook()
             return;
         }
     }
+
+    g_pWriteBitsTarget = target;
 
     uint8_t* stub = (uint8_t*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     if (!stub) return;
@@ -374,21 +377,15 @@ static void InstallPulseStrikeHook()
     HMODULE hDm = GetModuleHandleA("deathmatch.dll");
     if (!hDm) return;
 
+    uint8_t* target = (uint8_t*)hDm + 0x1A4110;
     static const uint8_t kExpectedPrefix[15] = {
         0x48, 0x89, 0x5C, 0x24, 0x10,
         0x48, 0x89, 0x6C, 0x24, 0x18,
         0x48, 0x89, 0x74, 0x24, 0x20
     };
-    static const char kMask[] = "xxxxxxxxxxxxxxx";
-    uint8_t* target = ScanPattern(hDm, kExpectedPrefix, kMask, sizeof(kExpectedPrefix));
-
-    if (!target)
+    if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
     {
-        target = (uint8_t*)hDm + 0x1A4110;
-        if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
-        {
-            return;
-        }
+        return;
     }
 
     uint8_t* trampoline = (uint8_t*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -455,21 +452,15 @@ static void InstallFunc1A25B0Hook()
     HMODULE hDm = GetModuleHandleA("deathmatch.dll");
     if (!hDm) return;
 
+    uint8_t* target = (uint8_t*)hDm + 0x1A25B0;
     static const uint8_t kExpectedPrefix[14] = {
         0x48, 0x89, 0x5C, 0x24, 0x18,
         0x48, 0x89, 0x6C, 0x24, 0x20,
         0x56, 0x57, 0x41, 0x56
     };
-    static const char kMask[] = "xxxxxxxxxxxxxx";
-    uint8_t* target = ScanPattern(hDm, kExpectedPrefix, kMask, sizeof(kExpectedPrefix));
-
-    if (!target)
+    if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
     {
-        target = (uint8_t*)hDm + 0x1A25B0;
-        if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
-        {
-            return;
-        }
+        return;
     }
 
     uint8_t* trampoline = (uint8_t*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -533,21 +524,15 @@ static void InstallFunc19F7D0Hook()
     HMODULE hDm = GetModuleHandleA("deathmatch.dll");
     if (!hDm) return;
 
+    uint8_t* target = (uint8_t*)hDm + 0x19F7D0;
     static const uint8_t kExpectedPrefix[15] = {
         0x48, 0x89, 0x5C, 0x24, 0x10,
         0x48, 0x89, 0x6C, 0x24, 0x18,
         0x48, 0x89, 0x74, 0x24, 0x20
     };
-    static const char kMask[] = "xxxxxxxxxxxxxxx";
-    uint8_t* target = ScanPattern(hDm, kExpectedPrefix, kMask, sizeof(kExpectedPrefix));
-
-    if (!target)
+    if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
     {
-        target = (uint8_t*)hDm + 0x19F7D0;
-        if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
-        {
-            return;
-        }
+        return;
     }
 
     uint8_t* trampoline = (uint8_t*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -622,21 +607,15 @@ static void InstallLuaProtection()
     HMODULE hLua = GetModuleHandleA("lua5.1.dll");
     if (!hLua) return;
 
+    uint8_t* target = (uint8_t*)hLua + 0x179C0;
     static const uint8_t kExpectedPrefix[15] = {
         0x48, 0x89, 0x5C, 0x24, 0x08,
         0x48, 0x89, 0x6C, 0x24, 0x10,
         0x48, 0x89, 0x74, 0x24, 0x18
     };
-    static const char kMask[] = "xxxxxxxxxxxxxxx";
-    uint8_t* target = ScanPattern(hLua, kExpectedPrefix, kMask, sizeof(kExpectedPrefix));
-
-    if (!target)
+    if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
     {
-        target = (uint8_t*)hLua + 0x179C0;
-        if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
-        {
-            target = nullptr;
-        }
+        target = nullptr;
     }
 
     if (target)
@@ -771,12 +750,6 @@ LONG WINAPI CrashFilter(PEXCEPTION_POINTERS pExceptionInfo)
 
     PCONTEXT ctx = pExceptionInfo->ContextRecord;
 
-    if (!g_WriteBitsHooked.load()) InstallWriteBitsHook();
-    if (!g_PulseStrikeHooked.load()) InstallPulseStrikeHook();
-    if (!g_Func1A25B0Hooked.load()) InstallFunc1A25B0Hook();
-    if (!g_Func19F7D0Hooked.load()) InstallFunc19F7D0Hook();
-    if (!g_LuaHSetHooked.load()) InstallLuaProtection();
-
     HMODULE hFaultMod = nullptr;
     if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                            (LPCSTR)ctx->Rip, &hFaultMod) && hFaultMod)
@@ -801,7 +774,8 @@ LONG WINAPI CrashFilter(PEXCEPTION_POINTERS pExceptionInfo)
                             "Exploit crash engellendi! [%s + 0x%llX] - Sunucu korundu.",
                             modName, (unsigned long long)rva);
 
-                if (_stricmp(modName, "net.dll") == 0 && (ctx->Rip >= (DWORD64)hFaultMod + 0x3A6B0 && ctx->Rip <= (DWORD64)hFaultMod + 0x3A795))
+                uint8_t* wbTarget = g_pWriteBitsTarget ? g_pWriteBitsTarget : ((uint8_t*)hFaultMod + 0x3A6B0);
+                if (_stricmp(modName, "net.dll") == 0 && (ctx->Rip >= (DWORD64)wbTarget && ctx->Rip <= (DWORD64)wbTarget + 0xF0))
                 {
                     if (Readable((void*)(ctx->Rsp + 0x48), 8))
                     {
@@ -812,7 +786,7 @@ LONG WINAPI CrashFilter(PEXCEPTION_POINTERS pExceptionInfo)
                         ctx->R14 = *(DWORD64*)(ctx->Rsp + 0x20);
                         ctx->Rsp += 0x28;
                     }
-                    ctx->Rip = (DWORD64)hFaultMod + 0x3A793;
+                    ctx->Rip = (DWORD64)wbTarget + 0xE3;
                     t_InFilter = 0;
                     return EXCEPTION_CONTINUE_EXECUTION;
                 }
@@ -1331,6 +1305,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID)
 {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH)
     {
+        HMODULE hSelf = nullptr;
+        GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCSTR)hModule, &hSelf);
+
         DisableThreadLibraryCalls(hModule);
         InitLogPaths(hModule);
         static std::atomic<bool> s_Initialized(false);
