@@ -1092,15 +1092,7 @@ DWORD WINAPI ShieldInitThread(LPVOID)
 
     AddVectoredExceptionHandler(1, CrashFilter);
 
-    WinExec("netsh advfirewall firewall delete rule name=\"MTGuard_Block_188.119.61.4\"", SW_HIDE);
-    WinExec("netsh advfirewall firewall delete rule name=\"MTGuard_Block_46.2.3.89\"", SW_HIDE);
-    WinExec("netsh advfirewall firewall delete rule name=\"MTGuard_Block_51.158.206.103\"", SW_HIDE);
-    WinExec("netsh advfirewall firewall delete rule name=\"MTGuard_Block_130.49.11.53\"", SW_HIDE);
-    WinExec("netsh advfirewall firewall delete rule name=\"MTGuard_Block_130.49.11.233\"", SW_HIDE);
-    WinExec("netsh advfirewall firewall delete rule name=\"MTGuard_Block_130.49.11.190\"", SW_HIDE);
-    WinExec("netsh advfirewall firewall delete rule name=\"MTGuard_Block_130.49.11.181\"", SW_HIDE);
-    WinExec("netsh advfirewall firewall delete rule name=\"MTGuard_Block_130.49.11.237\"", SW_HIDE);
-
+   
     for (int retry = 0; retry < 60; ++retry)
     {
         HookAllProcessModules();
