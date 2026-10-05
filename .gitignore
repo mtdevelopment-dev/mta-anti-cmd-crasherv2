@@ -8,6 +8,7 @@
 
 # Log files and crash dumps
 *.log
+*.db-journal
 disasm.txt
 mini.txt
 owl_strings.txt

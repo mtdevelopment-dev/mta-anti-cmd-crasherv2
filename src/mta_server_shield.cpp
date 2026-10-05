@@ -232,27 +232,41 @@ static volatile uint32_t* g_pBlockedCounter = nullptr;
 static uint8_t* ScanPattern(HMODULE hMod, const uint8_t* pattern, const char* mask, size_t len)
 {
     if (!hMod) return nullptr;
-    MODULEINFO mi;
-    if (!GetModuleInformation(GetCurrentProcess(), hMod, &mi, sizeof(mi))) return nullptr;
-
-    uint8_t* start = (uint8_t*)mi.lpBaseOfDll;
-    size_t size = mi.SizeOfImage;
-
-    for (size_t i = 0; i + len < size; ++i)
+    __try
     {
-        bool match = true;
-        for (size_t j = 0; j < len; ++j)
+        IMAGE_DOS_HEADER* dos = (IMAGE_DOS_HEADER*)hMod;
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE) return nullptr;
+        IMAGE_NT_HEADERS* nt = (IMAGE_NT_HEADERS*)((uint8_t*)hMod + dos->e_lfanew);
+        if (nt->Signature != IMAGE_NT_SIGNATURE) return nullptr;
+
+        IMAGE_SECTION_HEADER* sec = IMAGE_FIRST_SECTION(nt);
+        for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++sec)
         {
-            if (mask[j] != '?' && start[i + j] != pattern[j])
+            if (sec->Characteristics & IMAGE_SCN_MEM_EXECUTE)
             {
-                match = false;
-                break;
+                uint8_t* start = (uint8_t*)hMod + sec->VirtualAddress;
+                size_t size = sec->Misc.VirtualSize;
+                if (size == 0) size = sec->SizeOfRawData;
+
+                for (size_t off = 0; off + len <= size; ++off)
+                {
+                    bool match = true;
+                    for (size_t j = 0; j < len; ++j)
+                    {
+                        if (mask[j] != '?' && start[off + j] != pattern[j])
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+                    if (match) return start + off;
+                }
             }
         }
-        if (match)
-        {
-            return start + i;
-        }
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return nullptr;
     }
     return nullptr;
 }
