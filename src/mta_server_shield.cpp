@@ -229,6 +229,34 @@ static std::atomic<bool> g_WriteBitsHooked(false);
 static volatile uint32_t* g_pBlockedCounter = nullptr;
 
 #ifdef _WIN32
+static uint8_t* ScanPattern(HMODULE hMod, const uint8_t* pattern, const char* mask, size_t len)
+{
+    if (!hMod) return nullptr;
+    MODULEINFO mi;
+    if (!GetModuleInformation(GetCurrentProcess(), hMod, &mi, sizeof(mi))) return nullptr;
+
+    uint8_t* start = (uint8_t*)mi.lpBaseOfDll;
+    size_t size = mi.SizeOfImage;
+
+    for (size_t i = 0; i + len < size; ++i)
+    {
+        bool match = true;
+        for (size_t j = 0; j < len; ++j)
+        {
+            if (mask[j] != '?' && start[i + j] != pattern[j])
+            {
+                match = false;
+                break;
+            }
+        }
+        if (match)
+        {
+            return start + i;
+        }
+    }
+    return nullptr;
+}
+
 static void InstallWriteBitsHook()
 {
     if (g_WriteBitsHooked.load()) return;
@@ -236,12 +264,22 @@ static void InstallWriteBitsHook()
     HMODULE hNet = GetModuleHandleA("net.dll");
     if (!hNet) return;
 
-    uint8_t* target = (uint8_t*)hNet + 0x3A6B0;
+    static const uint8_t kPattern[] = {
+        0x45, 0x85, 0xC0, 0x0F, 0x84, 0x00, 0x00, 0x00, 0x00,
+        0x48, 0x89, 0x5C, 0x24, 0x10,
+        0x48, 0x89, 0x6C, 0x24, 0x18
+    };
+    static const char kMask[] = "xxxxx????xxxxxxxx";
+    uint8_t* target = ScanPattern(hNet, kPattern, kMask, sizeof(kPattern));
 
-    static const uint8_t kExpectedPrefix[9] = { 0x45, 0x85, 0xC0, 0x0F, 0x84, 0xDA, 0x00, 0x00, 0x00 };
-    if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
+    if (!target)
     {
-        return;
+        target = (uint8_t*)hNet + 0x3A6B0;
+        static const uint8_t kExpectedPrefix[9] = { 0x45, 0x85, 0xC0, 0x0F, 0x84, 0xDA, 0x00, 0x00, 0x00 };
+        if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
+        {
+            return;
+        }
     }
 
     uint8_t* stub = (uint8_t*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -322,16 +360,21 @@ static void InstallPulseStrikeHook()
     HMODULE hDm = GetModuleHandleA("deathmatch.dll");
     if (!hDm) return;
 
-    uint8_t* target = (uint8_t*)hDm + 0x1A4110;
-
     static const uint8_t kExpectedPrefix[15] = {
         0x48, 0x89, 0x5C, 0x24, 0x10,
         0x48, 0x89, 0x6C, 0x24, 0x18,
         0x48, 0x89, 0x74, 0x24, 0x20
     };
-    if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
+    static const char kMask[] = "xxxxxxxxxxxxxxx";
+    uint8_t* target = ScanPattern(hDm, kExpectedPrefix, kMask, sizeof(kExpectedPrefix));
+
+    if (!target)
     {
-        return;
+        target = (uint8_t*)hDm + 0x1A4110;
+        if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
+        {
+            return;
+        }
     }
 
     uint8_t* trampoline = (uint8_t*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -368,7 +411,7 @@ static void InstallPulseStrikeHook()
         FlushInstructionCache(GetCurrentProcess(), target, 15);
         g_PulseStrikeHooked.store(true);
         LogAndPrint("MTGuard", FOREGROUND_GREEN | FOREGROUND_INTENSITY,
-                    "Pulse Strike korumasi #1 aktif edildi (deathmatch.dll + 0x1A4110).");
+                    "Pulse Strike korumasi #1 aktif edildi (deathmatch.dll).");
     }
 }
 
@@ -398,16 +441,21 @@ static void InstallFunc1A25B0Hook()
     HMODULE hDm = GetModuleHandleA("deathmatch.dll");
     if (!hDm) return;
 
-    uint8_t* target = (uint8_t*)hDm + 0x1A25B0;
-
     static const uint8_t kExpectedPrefix[14] = {
         0x48, 0x89, 0x5C, 0x24, 0x18,
         0x48, 0x89, 0x6C, 0x24, 0x20,
         0x56, 0x57, 0x41, 0x56
     };
-    if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
+    static const char kMask[] = "xxxxxxxxxxxxxx";
+    uint8_t* target = ScanPattern(hDm, kExpectedPrefix, kMask, sizeof(kExpectedPrefix));
+
+    if (!target)
     {
-        return;
+        target = (uint8_t*)hDm + 0x1A25B0;
+        if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
+        {
+            return;
+        }
     }
 
     uint8_t* trampoline = (uint8_t*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -471,16 +519,21 @@ static void InstallFunc19F7D0Hook()
     HMODULE hDm = GetModuleHandleA("deathmatch.dll");
     if (!hDm) return;
 
-    uint8_t* target = (uint8_t*)hDm + 0x19F7D0;
-
     static const uint8_t kExpectedPrefix[15] = {
         0x48, 0x89, 0x5C, 0x24, 0x10,
         0x48, 0x89, 0x6C, 0x24, 0x18,
         0x48, 0x89, 0x74, 0x24, 0x20
     };
-    if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
+    static const char kMask[] = "xxxxxxxxxxxxxxx";
+    uint8_t* target = ScanPattern(hDm, kExpectedPrefix, kMask, sizeof(kExpectedPrefix));
+
+    if (!target)
     {
-        return;
+        target = (uint8_t*)hDm + 0x19F7D0;
+        if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
+        {
+            return;
+        }
     }
 
     uint8_t* trampoline = (uint8_t*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -555,14 +608,24 @@ static void InstallLuaProtection()
     HMODULE hLua = GetModuleHandleA("lua5.1.dll");
     if (!hLua) return;
 
-    uint8_t* target = (uint8_t*)hLua + 0x179C0;
     static const uint8_t kExpectedPrefix[15] = {
         0x48, 0x89, 0x5C, 0x24, 0x08,
         0x48, 0x89, 0x6C, 0x24, 0x10,
         0x48, 0x89, 0x74, 0x24, 0x18
     };
+    static const char kMask[] = "xxxxxxxxxxxxxxx";
+    uint8_t* target = ScanPattern(hLua, kExpectedPrefix, kMask, sizeof(kExpectedPrefix));
 
-    if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) == 0)
+    if (!target)
+    {
+        target = (uint8_t*)hLua + 0x179C0;
+        if (std::memcmp(target, kExpectedPrefix, sizeof(kExpectedPrefix)) != 0)
+        {
+            target = nullptr;
+        }
+    }
+
+    if (target)
     {
         uint8_t* trampoline = (uint8_t*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
         if (trampoline)
@@ -694,127 +757,74 @@ LONG WINAPI CrashFilter(PEXCEPTION_POINTERS pExceptionInfo)
 
     PCONTEXT ctx = pExceptionInfo->ContextRecord;
 
-    HMODULE hNet = GetModuleHandleA("net.dll");
-    if (hNet)
+    if (!g_WriteBitsHooked.load()) InstallWriteBitsHook();
+    if (!g_PulseStrikeHooked.load()) InstallPulseStrikeHook();
+    if (!g_Func1A25B0Hooked.load()) InstallFunc1A25B0Hook();
+    if (!g_Func19F7D0Hooked.load()) InstallFunc19F7D0Hook();
+    if (!g_LuaHSetHooked.load()) InstallLuaProtection();
+
+    HMODULE hFaultMod = nullptr;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCSTR)ctx->Rip, &hFaultMod) && hFaultMod)
     {
-        DWORD64 base = (DWORD64)hNet;
-        DWORD64 rip = ctx->Rip;
-
-        if (!g_WriteBitsHooked.load())
+        char modPath[MAX_PATH] = {0};
+        if (GetModuleFileNameA(hFaultMod, modPath, MAX_PATH))
         {
-            InstallWriteBitsHook();
-        }
+            char* slash = std::strrchr(modPath, '\\');
+            const char* modName = slash ? slash + 1 : modPath;
 
-        if (code == EXCEPTION_ACCESS_VIOLATION && rip >= base + 0x7A740 && rip <= base + 0x7A950)
-        {
-            ctx->Rax = ctx->Rdx;
-            ctx->Rip = base + 0x7A840;
-            t_InFilter = 0;
-            return EXCEPTION_CONTINUE_EXECUTION;
-        }
+            bool isMtaModule = (_stricmp(modName, "deathmatch.dll") == 0 ||
+                                _stricmp(modName, "net.dll") == 0 ||
+                                _stricmp(modName, "core.dll") == 0 ||
+                                _stricmp(modName, "lua5.1.dll") == 0 ||
+                                _stricmp(modName, "xmll.dll") == 0 ||
+                                _stricmp(modName, "MTA Server.exe") == 0);
 
-        if (code == EXCEPTION_ACCESS_VIOLATION && rip >= base + 0x3A6B0 && rip <= base + 0x3A795)
-        {
-            if (Readable((void*)(ctx->Rsp + 0x48), 8))
+            if (isMtaModule)
             {
-                ctx->Rsi = *(DWORD64*)(ctx->Rsp + 0x30);
-                ctx->Rbx = *(DWORD64*)(ctx->Rsp + 0x38);
-                ctx->Rbp = *(DWORD64*)(ctx->Rsp + 0x40);
-                ctx->Rdi = *(DWORD64*)(ctx->Rsp + 0x48);
-                ctx->R14 = *(DWORD64*)(ctx->Rsp + 0x20);
-                ctx->Rsp += 0x28;
+                DWORD64 rva = ctx->Rip - (DWORD64)hFaultMod;
+                LogAndPrint("MTGuard", FOREGROUND_GREEN | FOREGROUND_INTENSITY,
+                            "Exploit crash engellendi! [%s + 0x%llX] - Sunucu korundu.",
+                            modName, (unsigned long long)rva);
+
+                if (_stricmp(modName, "net.dll") == 0 && (ctx->Rip >= (DWORD64)hFaultMod + 0x3A6B0 && ctx->Rip <= (DWORD64)hFaultMod + 0x3A795))
+                {
+                    if (Readable((void*)(ctx->Rsp + 0x48), 8))
+                    {
+                        ctx->Rsi = *(DWORD64*)(ctx->Rsp + 0x30);
+                        ctx->Rbx = *(DWORD64*)(ctx->Rsp + 0x38);
+                        ctx->Rbp = *(DWORD64*)(ctx->Rsp + 0x40);
+                        ctx->Rdi = *(DWORD64*)(ctx->Rsp + 0x48);
+                        ctx->R14 = *(DWORD64*)(ctx->Rsp + 0x20);
+                        ctx->Rsp += 0x28;
+                    }
+                    ctx->Rip = (DWORD64)hFaultMod + 0x3A793;
+                    t_InFilter = 0;
+                    return EXCEPTION_CONTINUE_EXECUTION;
+                }
+
+                DWORD64 imageBase = (DWORD64)hFaultMod;
+                PRUNTIME_FUNCTION entry = RtlLookupFunctionEntry(ctx->Rip, &imageBase, nullptr);
+                if (entry)
+                {
+                    PVOID handlerData = nullptr;
+                    ULONG_PTR establisher = 0;
+                    RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, ctx->Rip, entry, ctx, &handlerData, &establisher, nullptr);
+                    ctx->Rax = 0;
+                    t_InFilter = 0;
+                    return EXCEPTION_CONTINUE_EXECUTION;
+                }
+
+                if (Readable((void*)ctx->Rsp, 8))
+                {
+                    DWORD64 retAddr = *(DWORD64*)ctx->Rsp;
+                    ctx->Rsp += 8;
+                    ctx->Rip = retAddr;
+                    ctx->Rax = 0;
+                    t_InFilter = 0;
+                    return EXCEPTION_CONTINUE_EXECUTION;
+                }
             }
-            ctx->Rip = base + 0x3A793;
-            t_InFilter = 0;
-            return EXCEPTION_CONTINUE_EXECUTION;
-        }
-    }
-
-    HMODULE hDm = GetModuleHandleA("deathmatch.dll");
-    if (hDm && code == EXCEPTION_ACCESS_VIOLATION)
-    {
-        DWORD64 dmBase = (DWORD64)hDm;
-        DWORD64 rip = ctx->Rip;
-
-        if (!g_PulseStrikeHooked.load())
-        {
-            InstallPulseStrikeHook();
-        }
-        if (!g_Func1A25B0Hooked.load())
-        {
-            InstallFunc1A25B0Hook();
-        }
-        if (!g_Func19F7D0Hooked.load())
-        {
-            InstallFunc19F7D0Hook();
-        }
-
-        if (rip >= dmBase + 0x1A4110 && rip <= dmBase + 0x1A4223)
-        {
-            DWORD64 r11 = ctx->Rsp + 0x50;
-            if (Readable((void*)r11, 0x40))
-            {
-                ctx->R15 = *(DWORD64*)(r11);
-                ctx->R14 = *(DWORD64*)(r11 + 0x8);
-                ctx->Rdi = *(DWORD64*)(r11 + 0x10);
-                DWORD64 retAddr = *(DWORD64*)(r11 + 0x18);
-                ctx->Rbx = *(DWORD64*)(r11 + 0x28);
-                ctx->Rbp = *(DWORD64*)(r11 + 0x30);
-                ctx->Rsi = *(DWORD64*)(r11 + 0x38);
-                ctx->Rsp = r11 + 0x20;
-                ctx->Rip = retAddr;
-                ctx->Rax = 0;
-                t_InFilter = 0;
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
-        }
-
-        if (rip >= dmBase + 0x1A25B0 && rip <= dmBase + 0x1A26C0)
-        {
-            DWORD64 r11 = ctx->Rsp + 0x50;
-            if (Readable((void*)r11, 0x40))
-            {
-                ctx->R14 = *(DWORD64*)(r11);
-                ctx->Rdi = *(DWORD64*)(r11 + 0x8);
-                ctx->Rsi = *(DWORD64*)(r11 + 0x10);
-                DWORD64 retAddr = *(DWORD64*)(r11 + 0x18);
-                ctx->Rbx = *(DWORD64*)(r11 + 0x30);
-                ctx->Rbp = *(DWORD64*)(r11 + 0x38);
-                ctx->Rsp = r11 + 0x20;
-                ctx->Rip = retAddr;
-                ctx->Rax = 0;
-                t_InFilter = 0;
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
-        }
-
-        if (rip >= dmBase + 0x19F7D0 && rip <= dmBase + 0x19F910)
-        {
-            if (Readable((void*)(ctx->Rsp + 0x30), 8))
-            {
-                ctx->Rdi = *(DWORD64*)(ctx->Rsp + 0x30);
-                ctx->Rbx = *(DWORD64*)(ctx->Rsp + 0x48);
-                ctx->Rbp = *(DWORD64*)(ctx->Rsp + 0x50);
-                ctx->Rsi = *(DWORD64*)(ctx->Rsp + 0x58);
-                DWORD64 retAddr = *(DWORD64*)(ctx->Rsp + 0x38);
-                ctx->Rsp += 0x40;
-                ctx->Rip = retAddr;
-                ctx->Rax = ctx->Rcx;
-                t_InFilter = 0;
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
-        }
-
-        DWORD64 imageBase = 0;
-        PRUNTIME_FUNCTION entry = RtlLookupFunctionEntry(rip, &imageBase, nullptr);
-        if (entry && imageBase == dmBase)
-        {
-            PVOID handlerData = nullptr;
-            ULONG_PTR establisher = 0;
-            RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, rip, entry, ctx, &handlerData, &establisher, nullptr);
-            ctx->Rax = 0;
-            t_InFilter = 0;
-            return EXCEPTION_CONTINUE_EXECUTION;
         }
     }
 
