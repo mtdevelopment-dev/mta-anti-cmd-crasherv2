@@ -308,7 +308,7 @@ static void InstallWriteBitsHook()
         0x41, 0x81, 0xF8, 0x00, 0x00, 0x10, 0x00,
         0x77, 0x1D,
         0x45, 0x85, 0xC0,
-        0x74, 0x18,
+        0x74, 0x1E,
         0x48, 0x89, 0x5C, 0x24, 0x10,
         0x48, 0x89, 0x6C, 0x24, 0x18,
         0xFF, 0x25, 0x00, 0x00, 0x00, 0x00,
@@ -362,12 +362,48 @@ bool Hooked_Func1A4110(void* rcx, void* rdx, void* r8)
     void* beginPtr = *(void**)rcx;
     void* endPtr = *((void**)rcx + 1);
 
-    if (!beginPtr || !Readable(beginPtr, 8) || beginPtr > endPtr)
+    if (beginPtr != nullptr && beginPtr != endPtr)
     {
-        return false;
+        if (beginPtr > endPtr)
+        {
+            LogAndPrint("MTGuard", FOREGROUND_GREEN | FOREGROUND_INTENSITY,
+                        "Pulse Strike exploit engellendi: Gecersiz vektor sinirlari!");
+            return false;
+        }
+
+        size_t bytes = (uintptr_t)endPtr - (uintptr_t)beginPtr;
+        if (bytes > 0x40000 || (bytes % sizeof(void*)) != 0 || !Readable(beginPtr, bytes))
+        {
+            LogAndPrint("MTGuard", FOREGROUND_GREEN | FOREGROUND_INTENSITY,
+                        "Pulse Strike exploit engellendi: Bozuk arguman dizisi!");
+            return false;
+        }
+
+        void** cur = (void**)beginPtr;
+        void** end = (void**)endPtr;
+        while (cur < end)
+        {
+            void* elem = *cur;
+            if (elem != nullptr && !Readable(elem, 8))
+            {
+                LogAndPrint("MTGuard", FOREGROUND_GREEN | FOREGROUND_INTENSITY,
+                            "Pulse Strike exploit engellendi: Gecersiz nesne pointer'i (0x%p)!", elem);
+                return false;
+            }
+            cur++;
+        }
     }
 
-    return g_OrigFunc1A4110(rcx, rdx, r8);
+    __try
+    {
+        return g_OrigFunc1A4110(rcx, rdx, r8);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        LogAndPrint("MTGuard", FOREGROUND_GREEN | FOREGROUND_INTENSITY,
+                    "Pulse Strike exploit engellendi (Func1A4110 icinde guvenle yakalandi).");
+        return false;
+    }
 }
 
 static void InstallPulseStrikeHook()
@@ -432,17 +468,55 @@ static std::atomic<bool> g_Func1A25B0Hooked(false);
 
 void Hooked_Func1A25B0(void* rcx, void* rdx, void* r8)
 {
-    if (!rdx || !Readable(rdx, 16))
+    if (!rcx || !Readable(rcx, 16) || !rdx || !Readable(rdx, 16))
     {
         return;
     }
+
     void* beginPtr = *(void**)rdx;
     void* endPtr = *((void**)rdx + 1);
-    if (!beginPtr || !Readable(beginPtr, 8) || beginPtr > endPtr)
+
+    if (beginPtr != nullptr && beginPtr != endPtr)
     {
-        return;
+        if (beginPtr > endPtr)
+        {
+            LogAndPrint("MTGuard", FOREGROUND_GREEN | FOREGROUND_INTENSITY,
+                        "Pulse Strike korumasi #2: Gecersiz vektor sinirlari!");
+            return;
+        }
+
+        size_t bytes = (uintptr_t)endPtr - (uintptr_t)beginPtr;
+        if (bytes > 0x40000 || (bytes % sizeof(void*)) != 0 || !Readable(beginPtr, bytes))
+        {
+            LogAndPrint("MTGuard", FOREGROUND_GREEN | FOREGROUND_INTENSITY,
+                        "Pulse Strike korumasi #2: Bozuk arguman dizisi!");
+            return;
+        }
+
+        void** cur = (void**)beginPtr;
+        void** end = (void**)endPtr;
+        while (cur < end)
+        {
+            void* elem = *cur;
+            if (elem != nullptr && !Readable(elem, 8))
+            {
+                LogAndPrint("MTGuard", FOREGROUND_GREEN | FOREGROUND_INTENSITY,
+                            "Pulse Strike korumasi #2: Gecersiz nesne pointer'i (0x%p)!", elem);
+                return;
+            }
+            cur++;
+        }
     }
-    g_OrigFunc1A25B0(rcx, rdx, r8);
+
+    __try
+    {
+        g_OrigFunc1A25B0(rcx, rdx, r8);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        LogAndPrint("MTGuard", FOREGROUND_GREEN | FOREGROUND_INTENSITY,
+                    "Pulse Strike korumasi #2 (Func1A25B0 icinde guvenle yakalandi).");
+    }
 }
 
 static void InstallFunc1A25B0Hook()
@@ -514,7 +588,18 @@ void* Hooked_Func19F7D0(void* rcx, void* rdx, void* r8)
         }
         return rcx;
     }
-    return g_OrigFunc19F7D0(rcx, rdx, r8);
+    __try
+    {
+        return g_OrigFunc19F7D0(rcx, rdx, r8);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        if (rcx && Readable(rcx, 16))
+        {
+            *(int*)rcx = 0;
+        }
+        return rcx;
+    }
 }
 
 static void InstallFunc19F7D0Hook()
@@ -765,7 +850,8 @@ LONG WINAPI CrashFilter(PEXCEPTION_POINTERS pExceptionInfo)
                                 _stricmp(modName, "core.dll") == 0 ||
                                 _stricmp(modName, "lua5.1.dll") == 0 ||
                                 _stricmp(modName, "xmll.dll") == 0 ||
-                                _stricmp(modName, "MTA Server.exe") == 0);
+                                _stricmp(modName, "MTA Server.exe") == 0 ||
+                                _stricmp(modName, "MTA Server64.exe") == 0);
 
             if (isMtaModule)
             {

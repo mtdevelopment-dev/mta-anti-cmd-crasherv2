@@ -1,97 +1,97 @@
 # MTA:SA Server Shield (x64)
 
-MTA:SA (Multi Theft Auto: San Andreas) 64-bit sunucuları (Windows & Linux) için geliştirilmiş, bilinen ve aktif kullanılan bellek taşması, paket manipülasyonu ve Lua çekirdek çökertme yöntemlerine karşı koruma sağlayan C++ modülüdür.
+A high-performance C++ module developed for 64-bit MTA:SA (Multi Theft Auto: San Andreas) servers (Windows & Linux). It provides kernel-level memory safety, packet filtering, and protection against known exploits, buffer overflows, and Lua VM panics.
 
 ---
 
-## 🛡️ Engellenen Güvenlik Açıkları
+## 🛡️ Protected Vulnerabilities
 
-Bu modül, MTA çekirdeğine dinamik bellek kancaları (hook), socket seviyesinde paket filtresi ve güvenli SEH/VEH/POSIX sinyal yakalayıcıları yerleştirerek sunucunun çökmesini engeller:
+This module injects dynamic hooks, socket-level datagram filtering, and resilient SEH / VEH / POSIX signal handlers to protect the server from being crashed:
 
 ### 1. Cascade (BitStream Buffer Overflow & Oversized Datagrams)
-- **Hedef:** `net.dll` / `net.so` (`BitStream::WriteBits`, `recvfrom`)
-- **Tehdit:** Negatif veya aşırı büyük bit sayısı gönderilerek `numberOfBitsToWrite` hesaplamasında integer overflow oluşturulması veya aşırı büyük UDP datagramları ile `0xC0000005` (Access Violation), `0xC0000374` (Heap Corruption) ya da Linux'ta `SIGSEGV` çökmesi.
-- **Çözüm:** Socket seviyesinde 4096 bayttan büyük geçersiz datagramlar filtrelenir; bellek taşması ve integer overflow parametreleri normalize edilerek paketler güvenle düşürülür.
+- **Target:** `net.dll` / `net.so` (`BitStream::WriteBits`, `recvfrom`)
+- **Threat:** Negative or excessively large bit count parameters causing integer overflows in `numberOfBitsToWrite`, or malformed oversized UDP datagrams causing `0xC0000005` (Access Violation), `0xC0000374` (Heap Corruption), or `SIGSEGV` on Linux.
+- **Mitigation:** Socket-level filtering drops abnormal datagrams exceeding 4096 bytes; parameters are validated and normalized before execution, safely discarding exploit payloads.
 
-### 2. Pulse Strike (Entity Deserializer Exploit)
-- **Hedef:** `deathmatch.dll` / `deathmatch.so`
-- **Tehdit:** Bozuk veya sahte entity pointer'ları (`0x414141414140` vb.) üzerinden okuma/yazma yapmaya zorlayarak çökme oluşturulması.
-- **Çözüm:** Pointer doğrulama ve güvenli SEH / Linux Signal (`SIGSEGV`/`SIGBUS`) kancaları eklenerek geçersiz nesne verileri ayıklanır; sunucu kesintiye uğramadan paket yok sayılır.
+### 2. Pulse Strike (Entity & Argument Deserializer Exploit)
+- **Target:** `deathmatch.dll` / `deathmatch.so`
+- **Threat:** Malicious or forged memory pointers (e.g. `0x414141414140`) sent via network RPCs/events, forcing read/write access violations during argument deserialization.
+- **Mitigation:** Strict pointer validation, boundary verification for non-empty argument vectors, and scoped SEH (`__try / __except`) exception handling ensure invalid objects are trapped and discarded without interrupting normal gameplay or crashing the server.
 
 ### 3. Whisper (Lua nil / NaN Key Crash)
-- **Hedef:** `lua5.1.dll` (`luaH_set`) ve Lua Panic Handler
-- **Tehdit:** Lua tablolarına `nil` veya `NaN` (Not a Number) anahtarlar gönderilerek Lua sanal makinesinin `table index is nil / NaN` panik hatasına düşmesi ve sunucu konsolunun aniden kapanması.
-- **Çözüm:** `luaH_set` kancalanarak geçersiz ve sayısal olmayan anahtarlar güvenli sahte bir havuza yönlendirilir; panic handler güvenli hale getirilerek sunucunun çalışmaya devam etmesi sağlanır.
+- **Target:** `lua5.1.dll` (`luaH_set`) and Lua Panic Handler
+- **Threat:** Injecting `nil` or `NaN` (Not a Number) keys into Lua tables, triggering an unhandled `table index is nil / NaN` panic that forces the server console to terminate.
+- **Mitigation:** Intercepts `luaH_set` to safely sink illegal/NaN keys into a dummy buffer, neutralizing panics and keeping the server alive.
 
 ---
 
-## 📁 Proje Yapısı
+## 📁 Repository Structure
 
 ```text
 mta_server_shield/
 ├── bin/
 │   └── x64/
-│       ├── mta_server_shield.dll   # Windows x64 modülü
-│       └── mta_server_shield.so    # Linux x64 modülü (derleme sonrası)
+│       ├── mta_server_shield.dll   # Windows x64 compiled module
+│       └── mta_server_shield.so    # Linux x64 compiled module
 ├── src/
-│   └── mta_server_shield.cpp       # Platformlar arası C++ kaynak kodu (Win + Linux)
-├── .gitignore                      # Git filtreleri
-├── build.bat                       # Windows MSVC otomatik derleme scripti
-├── build.sh                        # Linux GCC/Clang otomatik derleme scripti
-├── Makefile                        # Linux makefile derleme dosyası
-└── README.md                       # Dokümantasyon
+│   └── mta_server_shield.cpp       # Cross-platform C++ source code (Win + Linux)
+├── .gitignore                      # Git ignore rules
+├── build.bat                       # Windows MSVC x64 build script
+├── build.sh                        # Linux GCC/Clang build script
+├── Makefile                        # Linux makefile
+└── README.md                       # Documentation
 ```
 
 ---
 
-## 🚀 Kurulum
+## 🚀 Installation
 
-### 🪟 Windows Sunucular İçin:
-1. `bin/x64/mta_server_shield.dll` dosyasını sunucunuzun `x64/modules/` (veya `modules/`) klasörüne kopyalayın.
-2. `mtaserver.conf` dosyasını açıp `<modules>` etiketinin içine ekleyin:
+### 🪟 Windows Servers:
+1. Copy `bin/x64/mta_server_shield.dll` to your server's `x64/modules/` (or `modules/`) folder.
+2. Open `mtaserver.conf` and add the module entry inside `<config>`:
 ```xml
 <module src="mta_server_shield.dll" />
 ```
-3. Sunucuyu başlatın.
+3. Start your server.
 
-### 🐧 Linux Sunucular İçin (Ubuntu, Debian, CentOS):
-1. `bin/x64/mta_server_shield.so` dosyasını Linux sunucunuzun `x64/modules/` (veya `modules/`) klasörüne kopyalayın.
-2. `mtaserver.conf` dosyasını açıp `<modules>` etiketinin içine ekleyin:
+### 🐧 Linux Servers (Ubuntu, Debian, CentOS):
+1. Copy `bin/x64/mta_server_shield.so` to your server's `x64/modules/` (or `modules/`) folder.
+2. Open `mtaserver.conf` and add:
 ```xml
 <module src="mta_server_shield.so" />
 ```
-3. Alternatif olarak soket seviyesinde doğrudan yükleme için:
+3. Or alternatively, preload directly via socket layer:
 ```bash
 LD_PRELOAD=./x64/modules/mta_server_shield.so ./mta-server64
 ```
-4. Sunucuyu başlatın. Konsol çıktısında yeşil renkle banner ve korumanın devrede olduğu görüntülenecektir:
+4. Start your server. The console will display a green startup banner confirming active status:
 ```text
-[MTGuard] AKTIF & KORUMA CALISIYOR (LINUX)
+[MTGuard] ACTIVE & PROTECTION OPERATIONAL (LINUX)
 ```
 
 ---
 
-## 🛠️ Kaynak Koddan Derleme
+## 🛠️ Building from Source
 
 ### Windows (MSVC x64):
-1. Proje ana dizininde `build.bat` dosyasını çalıştırın (veya `x64 Native Tools Command Prompt for VS`).
-2. Çıktı: `bin/x64/mta_server_shield.dll`
+1. Run `build.bat` from the root directory (or use `x64 Native Tools Command Prompt for VS`).
+2. Output: `bin/x64/mta_server_shield.dll`
 
 ### Linux (GCC / Clang):
-Sunucunuzda derlemek için:
+Compile directly on your server:
 ```bash
-# Gerekli araçları yükleyin (Ubuntu / Debian):
+# Install dependencies (Ubuntu / Debian):
 sudo apt update && sudo apt install -y build-essential
 
-# Derleyin:
+# Build:
 make
-# veya
+# or
 chmod +x build.sh && ./build.sh
 ```
-Çıktı otomatik olarak `bin/x64/mta_server_shield.so` konumuna kaydedilir.
+Output: `bin/x64/mta_server_shield.so`
 
 ---
 
-## 📜 Lisans
+## 📜 License
 
-Bu proje eğitim ve sunucu güvenliği araştırma amaçları için geliştirilmiştir. Açık kaynak olarak serbestçe kullanılabilir ve geliştirilebilir.
+This project is developed for educational and server security research purposes. Open-source and free to adapt.
