@@ -1,0 +1,22 @@
+[2026-10-07 13:29:50.269] [MTGuard] Cascade exploit korumasi aktif edildi (net.dll + 0x3A6B0).
+[2026-10-07 13:29:50.271] [MTGuard] Exploit crash engellendi! [deathmatch.dll + 0x18928C] - Sunucu korundu.
+[2026-10-07 13:29:50.271] [MTGuard] Exploit crash engellendi! [net.dll + 0x4A07] - Sunucu korundu.
+[2026-10-07 13:29:50.271] [MTGuard] Pulse Strike korumasi #1 aktif edildi (deathmatch.dll).
+[2026-10-07 13:29:50.271] [MTGuard] Pulse Strike korumasi #2 aktif edildi (deathmatch.dll + 0x1A25B0).
+[2026-10-07 13:29:50.272] [MTGuard] CLuaArgument korumasi aktif edildi (deathmatch.dll + 0x19F7D0).
+[2026-10-07 13:29:50.272] [MTGuard] Exploit crash engellendi! [net.dll + 0x4FE9] - Sunucu korundu.
+[2026-10-07 13:29:50.272] [MTGuard] Lua table nil korumasi aktif edildi (lua5.1.dll + 0x179C0).
+[2026-10-07 13:29:50.273] [MTGuard] Lua panic sonlandiricisi guvenli hale getirildi (lua5.1.dll + 0xB704).
+[2026-10-07 13:29:50.273] [MTGuard] Exploit crash engellendi! [net.dll + 0x1B2B7] - Sunucu korundu.
+[2026-10-07 13:29:50.274] [MTGuard] Exploit crash engellendi! [net.dll + 0x1BCC3] - Sunucu korundu.
+[2026-10-07 13:29:50.275] [MTGuard] Exploit crash engellendi! [deathmatch.dll + 0x975B3] - Sunucu korundu.
+[2026-10-07 13:29:53.294] [MTGuard] Exploit crash engellendi! [deathmatch.dll + 0x18928C] - Sunucu korundu.
+[2026-10-07 13:29:55.320] [MTGuard] Exploit crash engellendi! [deathmatch.dll + 0x18928C] - Sunucu korundu.
+[2026-10-07 13:30:03.342] [MTGuard] Exploit crash engellendi! [deathmatch.dll + 0x18928C] - Sunucu korundu.
+[2026-10-07 13:30:06.362] [MTGuard] Exploit crash engellendi! [deathmatch.dll + 0x18928C] - Sunucu korundu.
+[2026-10-07 13:48:47.990] [MTGuard] Cascade exploit korumasi aktif edildi (net.dll + 0x3A6B0).
+[2026-10-07 13:48:47.991] [MTGuard] Pulse Strike korumasi #1 aktif edildi (deathmatch.dll).
+[2026-10-07 13:48:47.991] [MTGuard] Pulse Strike korumasi #2 aktif edildi (deathmatch.dll + 0x1A25B0).
+[2026-10-07 13:48:47.992] [MTGuard] CLuaArgument korumasi aktif edildi (deathmatch.dll + 0x19F7D0).
+[2026-10-07 13:48:47.992] [MTGuard] Lua table nil korumasi aktif edildi (lua5.1.dll + 0x179C0).
+[2026-10-07 13:48:47.993] [MTGuard] Lua panic sonlandiricisi guvenli hale getirildi (lua5.1.dll + 0xB704).
